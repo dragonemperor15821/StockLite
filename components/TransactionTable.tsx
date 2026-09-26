@@ -1,38 +1,52 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Transaction } from '@/lib/types'
+import { useEffect, useMemo, useState } from 'react'
+import { Transaction, TransactionType, Warehouse } from '@/lib/types'
 
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<TransactionType, string> = {
   IN: 'Stock in',
   OUT: 'Stock out',
   TRANSFER_OUT: 'Transfer out',
   TRANSFER_IN: 'Transfer in',
 }
 
+const TRANSACTION_TYPES = Object.keys(TYPE_LABELS) as TransactionType[]
+
+type TypeFilter = TransactionType | 'all'
+
+function toTypeFilter(value: string): TypeFilter {
+  return TRANSACTION_TYPES.find((type) => type === value) ?? 'all'
+}
+
 export default function TransactionTable({
   transactions,
+  warehouses,
 }: {
   transactions: Transaction[]
+  warehouses: Warehouse[]
 }) {
-  const warehouseOptions = useMemo(
-    () => Array.from(new Set(transactions.map((t) => t.warehouseName))).sort(),
-    [transactions],
-  )
-
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [warehouseFilter, setWarehouseFilter] = useState('all')
+
+  // Timestamps are formatted in the browser's locale/timezone only after
+  // mount, so the server-rendered HTML and the first client render match.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
   const visibleTransactions = useMemo(() => {
     return transactions
-      .filter((t) => typeFilter === 'all' || t.type === typeFilter)
+      .map((t, index) => ({ t, index }))
+      .filter(({ t }) => typeFilter === 'all' || t.type === typeFilter)
       .filter(
-        (t) => warehouseFilter === 'all' || t.warehouseName === warehouseFilter,
+        ({ t }) => warehouseFilter === 'all' || t.warehouseId === warehouseFilter,
       )
       .sort(
         (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+          Date.parse(b.t.timestamp) - Date.parse(a.t.timestamp) ||
+          // Equal timestamps (e.g. a linked transfer pair): newest insertion first.
+          b.index - a.index,
       )
+      .map(({ t }) => t)
   }, [transactions, typeFilter, warehouseFilter])
 
   return (
@@ -40,14 +54,15 @@ export default function TransactionTable({
       <div className="filter-bar">
         <select
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+          onChange={(e) => setTypeFilter(toTypeFilter(e.target.value))}
           aria-label="Filter by type"
         >
           <option value="all">All types</option>
-          <option value="IN">Stock in</option>
-          <option value="OUT">Stock out</option>
-          <option value="TRANSFER_OUT">Transfer out</option>
-          <option value="TRANSFER_IN">Transfer in</option>
+          {TRANSACTION_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {TYPE_LABELS[type]}
+            </option>
+          ))}
         </select>
 
         <select
@@ -56,9 +71,9 @@ export default function TransactionTable({
           aria-label="Filter by warehouse"
         >
           <option value="all">All warehouses</option>
-          {warehouseOptions.map((w) => (
-            <option key={w} value={w}>
-              {w}
+          {warehouses.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
             </option>
           ))}
         </select>
@@ -67,7 +82,7 @@ export default function TransactionTable({
       <div className="panel table-panel">
         {visibleTransactions.length === 0 ? (
           <div className="empty-state">
-            <h3>No transactions match these filters</h3>
+            <h3>No transactions match the current filters</h3>
             <p>Try a different type or warehouse.</p>
           </div>
         ) : (
@@ -87,9 +102,13 @@ export default function TransactionTable({
                 <tr key={t.id}>
                   <td>{t.productName}</td>
                   <td>{t.warehouseName}</td>
-                  <td>{TYPE_LABELS[t.type] ?? t.type}</td>
+                  <td>{TYPE_LABELS[t.type]}</td>
                   <td>{t.quantity}</td>
-                  <td>{new Date(t.timestamp).toLocaleString()}</td>
+                  <td>
+                    <time dateTime={t.timestamp}>
+                      {mounted ? new Date(t.timestamp).toLocaleString() : '—'}
+                    </time>
+                  </td>
                 </tr>
               ))}
             </tbody>
