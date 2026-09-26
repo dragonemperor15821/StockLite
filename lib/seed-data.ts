@@ -1,4 +1,10 @@
-import { Product, Transaction, TransactionType, Warehouse } from './types'
+import {
+  Product,
+  Transaction,
+  TransactionType,
+  Warehouse,
+  isValidQuantity,
+} from './types'
 
 export const warehouses: Warehouse[] = [
   {
@@ -251,36 +257,73 @@ export function recordTransaction(input: {
   return tx
 }
 
+// An expected, user-facing failure, carrying the HTTP status to respond with.
+export class StockError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'StockError'
+    this.status = status
+  }
+}
+
 // -------------------------------------------------------------------------
 // TASK 2 — Stock In / Stock Out
 // -------------------------------------------------------------------------
-// This is intentionally incomplete AND buggy. Right now it:
-//   - does NOT validate the quantity (accepts 0, negative, or non-numeric)
-//   - does NOT block a stock-out that exceeds current stock
-//     (so currentStock can go NEGATIVE — this is one of the Task 5 bugs)
-//   - does NOT call recordTransaction, so nothing shows up in History
-//
-// Participants must:
-//   1. Validate quantity is a positive, finite number
-//   2. Block OUT movements greater than currentStock
-//   3. Apply the movement to the correct product
-//   4. Call recordTransaction(...) so it appears in Transaction History
+// Every check runs before anything is written, so a rejected movement leaves
+// both the stock level and the transaction log untouched. On success the
+// stock update and its IN/OUT transaction are applied together.
 export function applyStockMovement(
   productId: string,
-  quantity: number,
+  warehouseId: string,
+  quantity: unknown,
   direction: 'IN' | 'OUT',
-): Product {
+): { product: Product; transaction: Transaction } {
+  if (!isValidQuantity(quantity)) {
+    throw new StockError('Quantity must be a whole number greater than 0.', 400)
+  }
+
+  const warehouse = warehouses.find((w) => w.id === warehouseId)
+  if (!warehouse) throw new StockError('Warehouse not found.', 404)
+
   const product = findProduct(productId)
-  if (!product) throw new Error('Product not found')
+  if (!product) throw new StockError('Product not found.', 404)
 
-  // TODO: validate quantity (reject <= 0, NaN, etc.)
-  // TODO: for OUT, block if quantity > product.currentStock
+  // Each product row belongs to exactly one warehouse; refuse to touch a row
+  // that doesn't belong to the requested warehouse.
+  if (product.warehouseId !== warehouse.id) {
+    throw new StockError(
+      `${product.name} is not stocked at ${warehouse.name}.`,
+      400,
+    )
+  }
 
-  product.currentStock += direction === 'IN' ? quantity : -quantity
+  if (direction === 'OUT' && quantity > product.currentStock) {
+    throw new StockError(
+      `Only ${product.currentStock} in stock at ${warehouse.name} — cannot stock out ${quantity}.`,
+      409,
+    )
+  }
 
-  // TODO: recordTransaction({ ... })
+  const nextStock =
+    direction === 'IN'
+      ? product.currentStock + quantity
+      : product.currentStock - quantity
+  if (!Number.isSafeInteger(nextStock)) {
+    throw new StockError('Quantity is too large.', 400)
+  }
 
-  return product
+  const transaction = recordTransaction({
+    productId: product.id,
+    productName: product.name,
+    warehouseId: warehouse.id,
+    type: direction,
+    quantity,
+  })
+  product.currentStock = nextStock
+
+  return { product, transaction }
 }
 
 // -------------------------------------------------------------------------

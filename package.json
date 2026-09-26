@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "tsc lib/seed-data.test.ts --outDir node_modules/.cache/stocklite-test --rootDir lib --module commonjs --target es2020 --esModuleInterop --skipLibCheck --strict && node node_modules/.cache/stocklite-test/seed-data.test.js"
   },
   "dependencies": {
     "next": "14.2.5",

@@ -1,38 +1,78 @@
 'use client'
 
-import { useState } from 'react'
-import { Product } from '@/lib/types'
+import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Product, Warehouse, isValidQuantity } from '@/lib/types'
+
+// Accept only plain digits ("12"), so values like "1e3", "1.5" or "-4" are
+// rejected rather than silently coerced.
+function parseQuantity(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  return isValidQuantity(value) ? value : null
+}
 
 export default function StockForm({
   products: initialProducts,
+  warehouses,
 }: {
   products: Product[]
+  warehouses: Warehouse[]
 }) {
+  const router = useRouter()
   const [products, setProducts] = useState(initialProducts)
-  const [productId, setProductId] = useState(initialProducts[0]?.id ?? '')
+
+  // A product is identified by name; each warehouse holds its own row for it.
+  const productNames = useMemo(
+    () => Array.from(new Set(products.map((p) => p.name))).sort(),
+    [products],
+  )
+  const rowFor = (name: string, whId: string) =>
+    products.find((p) => p.name === name && p.warehouseId === whId)
+
+  const [productName, setProductName] = useState(productNames[0] ?? '')
+  const [warehouseId, setWarehouseId] = useState(
+    () =>
+      warehouses.find((w) => rowFor(productNames[0] ?? '', w.id))?.id ??
+      warehouses[0]?.id ??
+      '',
+  )
   const [quantity, setQuantity] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const selectedProduct = products.find((p) => p.id === productId)
+  const selectedProduct = rowFor(productName, warehouseId)
+  const selectedWarehouse = warehouses.find((w) => w.id === warehouseId)
+
+  function handleProductChange(name: string) {
+    setProductName(name)
+    setError('')
+    setSuccess('')
+    // Keep the chosen warehouse if the product is stocked there.
+    if (!rowFor(name, warehouseId)) {
+      const firstStocked = warehouses.find((w) => rowFor(name, w.id))
+      if (firstStocked) setWarehouseId(firstStocked.id)
+    }
+  }
 
   async function submitMovement(direction: 'IN' | 'OUT') {
     setError('')
     setSuccess('')
 
-    const parsedQuantity = Number(quantity)
-    if (!quantity || !Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
-      setError('Enter a quantity greater than 0.')
+    if (!selectedProduct || !selectedWarehouse) {
+      setError('Select a product stocked at the chosen warehouse.')
       return
     }
-    if (
-      direction === 'OUT' &&
-      selectedProduct &&
-      parsedQuantity > selectedProduct.currentStock
-    ) {
+    const parsedQuantity = parseQuantity(quantity)
+    if (parsedQuantity === null) {
+      setError('Enter a whole number greater than 0.')
+      return
+    }
+    if (direction === 'OUT' && parsedQuantity > selectedProduct.currentStock) {
       setError(
-        `Only ${selectedProduct.currentStock} in stock — cannot stock out more than that.`,
+        `Only ${selectedProduct.currentStock} in stock at ${selectedWarehouse.name} — cannot stock out more than that.`,
       )
       return
     }
@@ -44,7 +84,8 @@ export default function StockForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'stock',
-          productId,
+          productId: selectedProduct.id,
+          warehouseId: selectedWarehouse.id,
           quantity: parsedQuantity,
           direction,
         }),
@@ -54,13 +95,15 @@ export default function StockForm({
         setError(data.error ?? 'Something went wrong.')
         return
       }
-      setProducts((prev) =>
-        prev.map((p) => (p.id === data.product.id ? data.product : p)),
-      )
+      const updated: Product = data.product
+      setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
       setSuccess(
-        `${direction === 'IN' ? 'Stocked in' : 'Stocked out'} ${parsedQuantity} unit${parsedQuantity === 1 ? '' : 's'} of ${data.product.name}.`,
+        `${direction === 'IN' ? 'Stocked in' : 'Stocked out'} ${parsedQuantity} unit${parsedQuantity === 1 ? '' : 's'} of ${updated.name} at ${selectedWarehouse.name}. New stock: ${updated.currentStock}.`,
       )
       setQuantity('')
+      // Drop cached server-rendered pages so Inventory and History show the
+      // new stock level and transaction on the next visit.
+      router.refresh()
     } catch {
       setError('Could not reach the server. Please try again.')
     } finally {
@@ -70,19 +113,41 @@ export default function StockForm({
 
   return (
     <div className="panel form-panel">
-      <form>
+      <form onSubmit={(e) => e.preventDefault()}>
         <div className="form-field">
           <label htmlFor="product">Product</label>
           <select
             id="product"
-            value={productId}
-            onChange={(e) => setProductId(e.target.value)}
+            value={productName}
+            onChange={(e) => handleProductChange(e.target.value)}
           >
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} — {p.warehouseId} ({p.currentStock} on hand)
+            {productNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
               </option>
             ))}
+          </select>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="warehouse">Warehouse</label>
+          <select
+            id="warehouse"
+            value={warehouseId}
+            onChange={(e) => {
+              setWarehouseId(e.target.value)
+              setError('')
+              setSuccess('')
+            }}
+          >
+            {warehouses.map((w) => {
+              const row = rowFor(productName, w.id)
+              return (
+                <option key={w.id} value={w.id} disabled={!row}>
+                  {w.name} {row ? `(${row.currentStock} on hand)` : '(not stocked)'}
+                </option>
+              )
+            })}
           </select>
         </div>
 
@@ -92,6 +157,7 @@ export default function StockForm({
             id="quantity"
             type="number"
             min={1}
+            step={1}
             placeholder="0"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}

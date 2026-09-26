@@ -1,6 +1,6 @@
 import DashboardShell from '@/components/DashboardShell'
 import StockForm from '@/components/StockForm'
-import { products } from '@/lib/seed-data'
+import { products, warehouses } from '@/lib/seed-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +13,7 @@ export default function StockPage() {
           <p>Record incoming or outgoing stock for a single warehouse.</p>
         </div>
       </div>
-      <StockForm products={products} />
+      <StockForm products={products} warehouses={warehouses} />
     </DashboardShell>
   )
 }

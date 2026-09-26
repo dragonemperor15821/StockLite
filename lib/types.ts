@@ -35,6 +35,12 @@ export type StaffUser = {
   role: 'staff'
 }
 
+// A stock movement quantity must be a whole number of units greater than 0.
+// Shared by the stock form and the server-side stock logic.
+export function isValidQuantity(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
 // Low-stock status shared by the inventory table and status badge.
 export type StockStatus = 'ok' | 'low' | 'critical'
 

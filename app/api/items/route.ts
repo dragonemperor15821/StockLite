@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
-import { applyStockMovement, applyTransfer, products } from '@/lib/seed-data'
+import {
+  StockError,
+  applyStockMovement,
+  applyTransfer,
+  products,
+} from '@/lib/seed-data'
 
 export async function GET() {
   return NextResponse.json({ products })
@@ -12,15 +17,20 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
 
   const action = body.action
 
   try {
     if (action === 'stock') {
-      const { productId, quantity, direction } = body as {
-        productId: string
-        quantity: number
-        direction: 'IN' | 'OUT'
+      const { productId, warehouseId, quantity, direction } = body
+      if (typeof productId !== 'string' || typeof warehouseId !== 'string') {
+        return NextResponse.json(
+          { error: 'productId and warehouseId are required' },
+          { status: 400 },
+        )
       }
       if (direction !== 'IN' && direction !== 'OUT') {
         return NextResponse.json(
@@ -28,8 +38,15 @@ export async function POST(request: Request) {
           { status: 400 },
         )
       }
-      const product = applyStockMovement(productId, Number(quantity), direction)
-      return NextResponse.json({ product, products })
+      // quantity is passed through untouched: applyStockMovement validates the
+      // raw value, so coercions like Number('') === 0 can't sneak through.
+      const { product, transaction } = applyStockMovement(
+        productId,
+        warehouseId,
+        quantity,
+        direction,
+      )
+      return NextResponse.json({ product, transaction, products })
     }
 
     if (action === 'transfer') {
@@ -49,6 +66,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Request failed'
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = err instanceof StockError ? err.status : 400
+    return NextResponse.json({ error: message }, { status })
   }
 }
