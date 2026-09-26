@@ -5,6 +5,11 @@ import {
   IconTransfer,
   IconHistory,
 } from '@/components/Sidebar'
+import { products, warehouses } from '@/lib/seed-data'
+import { summarizeLowStock } from '@/lib/types'
+
+// The hero figures are read from the live store, not hardcoded.
+export const dynamic = 'force-dynamic'
 
 const QUICK_LINKS = [
   {
@@ -35,6 +40,15 @@ const QUICK_LINKS = [
 ]
 
 export default function HomePage() {
+  const featuredWarehouse = warehouses[0]
+  const featuredUnits = products
+    .filter((p) => p.warehouseId === featuredWarehouse?.id)
+    .reduce((sum, p) => sum + p.currentStock, 0)
+  const lowStockCount = summarizeLowStock(products, warehouses).reduce(
+    (sum, w) => sum + w.lowStockCount,
+    0,
+  )
+
   return (
     <>
       <nav className="marketing-nav">
@@ -66,8 +80,10 @@ export default function HomePage() {
 
         <div className="hero-visual">
           <div className="floating-panel" style={{ marginTop: 40 }}>
-            <h4>North Distribution Center</h4>
-            <div className="big-stat">1,842 units</div>
+            <h4>{featuredWarehouse?.name}</h4>
+            <div className="big-stat">
+              {featuredUnits.toLocaleString('en-US')} units
+            </div>
             <p
               style={{
                 fontSize: 12.5,
@@ -79,7 +95,8 @@ export default function HomePage() {
             </p>
           </div>
           <div className="floating-chip" style={{ top: '18%', left: '8%' }}>
-            ⚠ 4 items near reorder threshold
+            ⚠ {lowStockCount} item{lowStockCount === 1 ? '' : 's'} at or below
+            reorder threshold
           </div>
           <div
             className="floating-chip"

@@ -58,6 +58,27 @@ export function isLowStock(product: Product): boolean {
   return product.currentStock <= product.reorderThreshold
 }
 
+export type WarehouseLowStock = {
+  warehouse: Warehouse
+  lowStockCount: number
+  productCount: number
+}
+
+// Per-warehouse count of products needing replenishment, using isLowStock.
+export function summarizeLowStock(
+  products: Product[],
+  warehouses: Warehouse[],
+): WarehouseLowStock[] {
+  return warehouses.map((warehouse) => {
+    const rows = products.filter((p) => p.warehouseId === warehouse.id)
+    return {
+      warehouse,
+      lowStockCount: rows.filter(isLowStock).length,
+      productCount: rows.length,
+    }
+  })
+}
+
 export function getStockStatus(product: Product): StockStatus {
   if (!isLowStock(product)) return 'ok'
   if (product.currentStock < product.reorderThreshold) return 'critical'
