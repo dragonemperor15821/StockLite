@@ -6,6 +6,7 @@ import {
   Warehouse,
   getStockStatus,
   getStockStatusLabel,
+  isLowStock,
 } from '@/lib/types'
 import StatusBadge from '@/components/StatusBadge'
 
@@ -30,7 +31,7 @@ export default function InventoryTable({
     return products.filter((p) => {
       if (selectedCategory !== 'all' && p.category !== selectedCategory)
         return false
-      if (lowStockOnly && p.currentStock > p.reorderThreshold) return false
+      if (lowStockOnly && !isLowStock(p)) return false
       return true
     })
   }, [products, selectedCategory, lowStockOnly])
@@ -64,7 +65,7 @@ export default function InventoryTable({
           onChange={(e) => setSelectedCategory(e.target.value)}
           aria-label="Filter by category"
         >
-          <option value="all">All categories</option>
+          <option value="all">All Categories</option>
           {categories.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -72,21 +73,21 @@ export default function InventoryTable({
           ))}
         </select>
 
-        <label className="checkbox-filter">
-          <input
-            type="checkbox"
-            checked={lowStockOnly}
-            onChange={(e) => setLowStockOnly(e.target.checked)}
-          />
-          Low stock only
-        </label>
+        <select
+          value={lowStockOnly ? 'low' : 'all'}
+          onChange={(e) => setLowStockOnly(e.target.value === 'low')}
+          aria-label="Filter by stock level"
+        >
+          <option value="all">All Stock</option>
+          <option value="low">Low Stock Only</option>
+        </select>
       </div>
 
       <div className="panel table-panel">
         {visibleProducts.length === 0 ? (
           <div className="empty-state">
-            <h3>No products match these filters</h3>
-            <p>Try a different category or clear the low stock filter.</p>
+            <h3>No inventory items match the current filters</h3>
+            <p>Try a different category or switch back to All Stock.</p>
           </div>
         ) : (
           <div className="table-scroll" tabIndex={0} aria-label="Inventory table">
