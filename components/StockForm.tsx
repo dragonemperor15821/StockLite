@@ -2,16 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Product, Warehouse, isValidQuantity } from '@/lib/types'
-
-// Accept only plain digits ("12"), so values like "1e3", "1.5" or "-4" are
-// rejected rather than silently coerced.
-function parseQuantity(raw: string): number | null {
-  const trimmed = raw.trim()
-  if (!/^\d+$/.test(trimmed)) return null
-  const value = Number(trimmed)
-  return isValidQuantity(value) ? value : null
-}
+import { Product, Warehouse, parseQuantityInput } from '@/lib/types'
 
 export default function StockForm({
   products: initialProducts,
@@ -65,7 +56,7 @@ export default function StockForm({
       setError('Select a product stocked at the chosen warehouse.')
       return
     }
-    const parsedQuantity = parseQuantity(quantity)
+    const parsedQuantity = parseQuantityInput(quantity)
     if (parsedQuantity === null) {
       setError('Enter a whole number greater than 0.')
       return

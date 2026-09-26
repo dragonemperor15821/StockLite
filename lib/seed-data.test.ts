@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   StockError,
   applyStockMovement,
+  applyTransfer,
   findProduct,
   products,
   transactions,
@@ -106,6 +107,108 @@ test('a product row cannot be moved through the other warehouse', () => {
 test('unknown product or warehouse is rejected with 404', () => {
   assertRejected(() => applyStockMovement('p-999', 'wh-north', 1, 'IN'), 404)
   assertRejected(() => applyStockMovement(NORTH_ROW, 'wh-east', 1, 'IN'), 404)
+})
+
+// p-011 / p-012 are Nitrile Gloves in North / South.
+const GLOVES_NORTH = 'p-011'
+const GLOVES_SOUTH = 'p-012'
+
+test('transfer moves stock between warehouses and logs a linked pair', () => {
+  const north = stockOf(GLOVES_NORTH)
+  const south = stockOf(GLOVES_SOUTH)
+  const rowCount = products.length
+  const txCount = transactions.length
+
+  const { source, destination, transactions: pair } = applyTransfer(
+    GLOVES_NORTH,
+    'wh-north',
+    'wh-south',
+    30,
+  )
+
+  assert.equal(source.id, GLOVES_NORTH)
+  assert.equal(destination.id, GLOVES_SOUTH)
+  assert.equal(stockOf(GLOVES_NORTH), north - 30)
+  assert.equal(stockOf(GLOVES_SOUTH), south + 30)
+  assert.equal(products.length, rowCount, 'no row is created when one exists')
+
+  const [out, into] = pair
+  assert.equal(transactions.length, txCount + 2)
+  assert.deepEqual(transactions.slice(-2), [out, into])
+  assert.equal(out.type, 'TRANSFER_OUT')
+  assert.equal(out.productId, GLOVES_NORTH)
+  assert.equal(out.warehouseId, 'wh-north')
+  assert.equal(into.type, 'TRANSFER_IN')
+  assert.equal(into.productId, GLOVES_SOUTH)
+  assert.equal(into.warehouseId, 'wh-south')
+  assert.equal(out.quantity, 30)
+  assert.equal(into.quantity, 30)
+  assert.equal(out.linkedTransactionId, into.id)
+  assert.equal(into.linkedTransactionId, out.id)
+})
+
+test('transfer back the other way works too', () => {
+  const north = stockOf(GLOVES_NORTH)
+  const south = stockOf(GLOVES_SOUTH)
+  applyTransfer(GLOVES_SOUTH, 'wh-south', 'wh-north', 5)
+  assert.equal(stockOf(GLOVES_SOUTH), south - 5)
+  assert.equal(stockOf(GLOVES_NORTH), north + 5)
+})
+
+test('transfer creates the destination row when the product is new there', () => {
+  // Packing Tape (p-005) is only stocked in North.
+  const tape = findProduct('p-005')!
+  const before = tape.currentStock
+  assert.equal(
+    products.some((p) => p.name === tape.name && p.warehouseId === 'wh-south'),
+    false,
+  )
+
+  const { destination } = applyTransfer('p-005', 'wh-north', 'wh-south', 25)
+
+  assert.equal(tape.currentStock, before - 25)
+  assert.equal(destination.warehouseId, 'wh-south')
+  assert.equal(destination.name, tape.name)
+  assert.equal(destination.category, tape.category)
+  assert.equal(destination.reorderThreshold, tape.reorderThreshold)
+  assert.equal(destination.currentStock, 25)
+  assert.equal(findProduct(destination.id), destination)
+  assert.equal(new Set(products.map((p) => p.id)).size, products.length)
+
+  // A second transfer reuses the new row instead of creating another.
+  const rowCount = products.length
+  applyTransfer('p-005', 'wh-north', 'wh-south', 5)
+  assert.equal(products.length, rowCount)
+  assert.equal(destination.currentStock, 30)
+})
+
+test('transfer of the entire source stock leaves the source at 0', () => {
+  applyTransfer(GLOVES_SOUTH, 'wh-south', 'wh-north', stockOf(GLOVES_SOUTH))
+  assert.equal(stockOf(GLOVES_SOUTH), 0)
+})
+
+test('rejected transfers change nothing', () => {
+  // insufficient stock
+  assertRejected(
+    () => applyTransfer(GLOVES_NORTH, 'wh-north', 'wh-south', stockOf(GLOVES_NORTH) + 1),
+    409,
+  )
+  assertRejected(() => applyTransfer(GLOVES_SOUTH, 'wh-south', 'wh-north', 1), 409)
+  // same warehouse
+  assertRejected(() => applyTransfer(GLOVES_NORTH, 'wh-north', 'wh-north', 1), 400)
+  // product not at the stated source
+  assertRejected(() => applyTransfer(GLOVES_NORTH, 'wh-south', 'wh-north', 1), 400)
+  // unknown warehouses / product
+  assertRejected(() => applyTransfer(GLOVES_NORTH, 'wh-east', 'wh-south', 1), 404)
+  assertRejected(() => applyTransfer(GLOVES_NORTH, 'wh-north', 'wh-east', 1), 404)
+  assertRejected(() => applyTransfer('p-999', 'wh-north', 'wh-south', 1), 404)
+  // invalid quantities
+  for (const quantity of [0, -5, 2.5, NaN, Infinity, '5', '', null, undefined, true]) {
+    assertRejected(
+      () => applyTransfer(GLOVES_NORTH, 'wh-north', 'wh-south', quantity),
+      400,
+    )
+  }
 })
 
 test('seeded transactions are left intact', () => {

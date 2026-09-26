@@ -50,17 +50,28 @@ export async function POST(request: Request) {
     }
 
     if (action === 'transfer') {
-      const { productId, destWarehouseId, quantity } = body as {
-        productId: string
-        destWarehouseId: string
-        quantity: number
+      const { productId, sourceWarehouseId, destWarehouseId, quantity } = body
+      if (
+        typeof productId !== 'string' ||
+        typeof sourceWarehouseId !== 'string' ||
+        typeof destWarehouseId !== 'string'
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'productId, sourceWarehouseId and destWarehouseId are required',
+          },
+          { status: 400 },
+        )
       }
-      const { source, destination } = applyTransfer(
+      // As with stock movements, quantity is validated raw by applyTransfer.
+      const { source, destination, transactions } = applyTransfer(
         productId,
+        sourceWarehouseId,
         destWarehouseId,
-        Number(quantity),
+        quantity,
       )
-      return NextResponse.json({ source, destination, products })
+      return NextResponse.json({ source, destination, transactions, products })
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

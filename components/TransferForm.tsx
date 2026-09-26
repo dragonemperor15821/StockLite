@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Product, Warehouse } from '@/lib/types'
+import { useRouter } from 'next/navigation'
+import { Product, Warehouse, parseQuantityInput } from '@/lib/types'
 
 export default function TransferForm({
   products: initialProducts,
@@ -10,6 +11,7 @@ export default function TransferForm({
   products: Product[]
   warehouses: Warehouse[]
 }) {
+  const router = useRouter()
   const [products, setProducts] = useState(initialProducts)
   const [sourceWarehouseId, setSourceWarehouseId] = useState(
     warehouses[0]?.id ?? '',
@@ -39,21 +41,38 @@ export default function TransferForm({
   }
 
   const selectedProduct = products.find((p) => p.id === productId)
+  const warehouseName = (id: string) =>
+    warehouses.find((w) => w.id === id)?.name ?? id
 
-  // TASK 3: This currently sends the transfer request with no validation at
-  // all, and doesn't update the UI afterward. Add checks before calling the
-  // API:
-  //   - source and destination warehouses must be different
-  //   - a product must be selected
-  //   - quantity must be a positive number and <= selectedProduct.currentStock
-  // Then, after a successful response, update `products` state using
-  // data.source and data.destination (add the destination row if it's new).
+  // These checks give quick feedback; the API re-validates everything.
   async function handleTransfer(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setSuccess('')
 
-    const parsedQuantity = Number(quantity)
+    if (!sourceWarehouseId || !destWarehouseId) {
+      setError('Choose both a source and a destination warehouse.')
+      return
+    }
+    if (sourceWarehouseId === destWarehouseId) {
+      setError('Source and destination warehouses must be different.')
+      return
+    }
+    if (!selectedProduct || selectedProduct.warehouseId !== sourceWarehouseId) {
+      setError('Select a product at the source warehouse.')
+      return
+    }
+    const parsedQuantity = parseQuantityInput(quantity)
+    if (parsedQuantity === null) {
+      setError('Enter a whole number greater than 0.')
+      return
+    }
+    if (parsedQuantity > selectedProduct.currentStock) {
+      setError(
+        `Only ${selectedProduct.currentStock} in stock at ${warehouseName(sourceWarehouseId)} — cannot transfer more than that.`,
+      )
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -62,7 +81,8 @@ export default function TransferForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'transfer',
-          productId,
+          productId: selectedProduct.id,
+          sourceWarehouseId,
           destWarehouseId,
           quantity: parsedQuantity,
         }),
@@ -73,12 +93,23 @@ export default function TransferForm({
         return
       }
 
-      // TODO: update `products` state with data.source and data.destination
-
+      const source: Product = data.source
+      const destination: Product = data.destination
+      setProducts((prev) => {
+        const next = prev.map((p) =>
+          p.id === source.id ? source : p.id === destination.id ? destination : p,
+        )
+        return next.some((p) => p.id === destination.id)
+          ? next
+          : [...next, destination]
+      })
       setSuccess(
-        `Transferred ${parsedQuantity} unit${parsedQuantity === 1 ? '' : 's'} of ${data.source.name} to the destination warehouse.`,
+        `Transferred ${parsedQuantity} unit${parsedQuantity === 1 ? '' : 's'} of ${source.name} from ${warehouseName(source.warehouseId)} (now ${source.currentStock}) to ${warehouseName(destination.warehouseId)} (now ${destination.currentStock}).`,
       )
       setQuantity('')
+      // Drop cached server-rendered pages so Inventory and History show the
+      // transfer on the next visit.
+      router.refresh()
     } catch {
       setError('Could not reach the server. Please try again.')
     } finally {
@@ -88,7 +119,7 @@ export default function TransferForm({
 
   return (
     <div className="panel form-panel">
-      <form onSubmit={handleTransfer}>
+      <form onSubmit={handleTransfer} noValidate>
         <div className="form-field">
           <label htmlFor="source">Source warehouse</label>
           <select

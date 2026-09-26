@@ -41,6 +41,15 @@ export function isValidQuantity(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
 
+// Parses a quantity typed into a form. Only plain digits ("12") are accepted,
+// so values like "1e3", "1.5" or "-4" are rejected rather than coerced.
+export function parseQuantityInput(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  return isValidQuantity(value) ? value : null
+}
+
 // Low-stock status shared by the inventory table and status badge.
 export type StockStatus = 'ok' | 'low' | 'critical'
 
